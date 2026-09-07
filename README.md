@@ -2,7 +2,7 @@
 
 Provisioning a GPU on Azure AKS with Terraform, install the NVIDIA GPU Operator, and server Qwen2.5-7B-instruct-AWQ through vLLM's OpenAI-compatible API - a production shaped inference endpoint, reachable via curl /v1/completions
 
-## Contents
+## Table of Contents
 
 - [Why self-hosting LLM Serving instead of calling Frontir Model(s) API?](#why-self-hosting-llm-serving-instead-of-calling-frontir-models-api)
 - [Open Source vs Closed Source Models](#open-source-vs-closed-source-models)
