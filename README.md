@@ -15,6 +15,12 @@
 [![GitHub issues](https://img.shields.io/github/issues/javakishore-veleti/LLM-Inference-Serving-Azure-AKS)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-AKS/issues)
 [![GitHub stars](https://img.shields.io/github/stars/javakishore-veleti/LLM-Inference-Serving-Azure-AKS)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-AKS/stargazers)
 
+**LLM inference serving** is keeping trained weights on a GPU and turning live HTTP requests into generated tokens. Training is over. This is the production path: many callers at once, a stable API, time-to-first-token, and VRAM spent on the **KV cache** (the conversation so far), not on fitting the model once.
+
+**Why LLM inference needs vLLM.** A notebook `model.generate()` runs one prompt, then idles the card. Real traffic is concurrent, uneven, and long-context. Without a serving engine the GPU either waits between requests, OOMs when KV fills, or you write your own batcher, paged KV, and HTTP server. Inference needs that stack; the model file alone is not a service.
+
+**Why vLLM.** It is that stack: **PagedAttention** (KV treated like virtual memory so the card stays packed), **continuous batching** (new requests join a running batch instead of waiting for a queue to drain), and an **OpenAI-compatible HTTP** front (`/v1/completions`, `/v1/chat/completions`, `/v1/models`, `/metrics`). Throughput is tokens per second across the batch. That is why this repo serves Qwen with vLLM instead of a raw PyTorch loop.
+
 Deploy **vLLM** serving for **Qwen2.5-7B-Instruct-AWQ** on **Azure AKS**, **Runpod**, or both.
 
 **Azure AKS:** Terraform, NVIDIA GPU Operator, GPU node pool.
