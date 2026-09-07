@@ -1,5 +1,20 @@
 # LLM-Inference-Serving-Azure-AKS
 
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Serving](https://img.shields.io/badge/serving-vLLM-111111)](https://docs.vllm.ai/)
+[![API](https://img.shields.io/badge/API-OpenAI%20compatible-009688)](https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html)
+[![Model](https://img.shields.io/badge/model-Qwen2.5--7B--Instruct--AWQ-4B8BBE)](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-AWQ)
+[![IaC](https://img.shields.io/badge/IaC-Terraform-844FBA?logo=terraform&logoColor=white)](https://www.terraform.io/)
+
+[![Azure](https://img.shields.io/badge/Azure-AKS-0078D4?logo=microsoftazure&logoColor=white)](https://learn.microsoft.com/azure/aks/)
+[![Runpod](https://img.shields.io/badge/Runpod-GPU-7B2D8E)](https://www.runpod.io/)
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-326CE5?logo=kubernetes&logoColor=white)](https://kubernetes.io/)
+[![NVIDIA](https://img.shields.io/badge/GPU-NVIDIA-76B900?logo=nvidia&logoColor=white)](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/index.html)
+[![GitHub last commit](https://img.shields.io/github/last-commit/javakishore-veleti/LLM-Inference-Serving-Azure-AKS)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-AKS/commits/main)
+[![GitHub issues](https://img.shields.io/github/issues/javakishore-veleti/LLM-Inference-Serving-Azure-AKS)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-AKS/issues)
+[![GitHub stars](https://img.shields.io/github/stars/javakishore-veleti/LLM-Inference-Serving-Azure-AKS)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-AKS/stargazers)
+
 Deploy **vLLM** serving for **Qwen2.5-7B-Instruct-AWQ** on **Azure AKS**, **Runpod**, or both — same OpenAI-compatible door: `POST /v1/completions`.
 
 Azure AKS: Terraform, NVIDIA GPU Operator, GPU node pool. Runpod: a pinned `vllm/vllm-openai` container on a GPU host (this lab: community RTX 3090) when AKS quota is unavailable. Clients hit `/v1/completions` on whichever path is live.
