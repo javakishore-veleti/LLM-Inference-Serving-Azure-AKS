@@ -1,0 +1,67 @@
+name: RUNPOD-0004-Destroy
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: runpod-vllm
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  destroy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform/runpod
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      TF_IN_AUTOMATION: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require RUNPOD_API_KEY
+        working-directory: .
+        run: |
+          if [ -z "${RUNPOD_API_KEY}" ]; then
+            echo "Add repo secret RUNPOD_API_KEY."
+            exit 1
+          fi
+
+      - name: Download tfstate from latest RUNPOD-0002-Setup
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_ID=$(gh run list \
+            --workflow RUNPOD-0002-Setup.yml \
+            --branch "${{ github.ref_name }}" \
+            --status success \
+            --limit 1 \
+            --json databaseId \
+            --jq '.[0].databaseId')
+          if [ -z "${RUN_ID}" ] || [ "${RUN_ID}" = "null" ]; then
+            echo "No successful RUNPOD-0002-Setup run on this branch. Run Setup first."
+            exit 1
+          fi
+          echo "Using Setup run ${RUN_ID}"
+          gh run download "${RUN_ID}" -n runpod-tfstate -D terraform/runpod
+
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.13.3"
+          terraform_wrapper: false
+
+      - name: Terraform init
+        run: terraform init -input=false
+
+      - name: Terraform destroy
+        run: terraform destroy -input=false -auto-approve
+
+      - name: Summary
+        run: echo "Pod destroyed. GPU bill should be \$0. Confirm with RUNPOD-0001-CheckPods." >> "$GITHUB_STEP_SUMMARY"

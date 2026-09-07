@@ -1,0 +1,62 @@
+name: RUNPOD-0002-Setup
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: runpod-vllm
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform/runpod
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      TF_IN_AUTOMATION: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require RUNPOD_API_KEY
+        run: |
+          if [ -z "${RUNPOD_API_KEY}" ]; then
+            echo "Add repo secret RUNPOD_API_KEY."
+            exit 1
+          fi
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.13.3"
+          terraform_wrapper: false
+
+      - name: Terraform init
+        run: terraform init -input=false
+
+      - name: Terraform apply
+        run: terraform apply -input=false -auto-approve
+
+      - name: Outputs
+        run: |
+          terraform output
+          {
+            echo "### Runpod pod"
+            echo ""
+            echo "- id: \`$(terraform output -raw pod_id)\`"
+            echo "- cost/hr: $(terraform output -raw cost_per_hr)"
+            echo "- models: $(terraform output -raw models_url)"
+            echo ""
+            echo "Next: run **RUNPOD-0003-Verify**, then **RUNPOD-0004-Destroy** (GPU bills until destroy)."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runpod-tfstate
+          path: terraform/runpod/terraform.tfstate
+          if-no-files-found: error
+          retention-days: 7

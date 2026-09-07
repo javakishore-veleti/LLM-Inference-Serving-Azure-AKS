@@ -1,0 +1,60 @@
+name: RUNPOD-0003-Verify
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: runpod-vllm
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
+      TF_IN_AUTOMATION: "true"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download tfstate from latest RUNPOD-0002-Setup
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          RUN_ID=$(gh run list \
+            --workflow RUNPOD-0002-Setup.yml \
+            --branch "${{ github.ref_name }}" \
+            --status success \
+            --limit 1 \
+            --json databaseId \
+            --jq '.[0].databaseId')
+          if [ -z "${RUN_ID}" ] || [ "${RUN_ID}" = "null" ]; then
+            echo "No successful RUNPOD-0002-Setup run on this branch. Run Setup first."
+            exit 1
+          fi
+          echo "Using Setup run ${RUN_ID}"
+          gh run download "${RUN_ID}" -n runpod-tfstate -D terraform/runpod
+
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.13.3"
+          terraform_wrapper: false
+
+      - name: Read pod id from state
+        id: tf
+        working-directory: terraform/runpod
+        run: |
+          terraform init -input=false
+          echo "pod_id=$(terraform output -raw pod_id)" >> "$GITHUB_OUTPUT"
+
+      - name: curl /v1/models and /v1/completions
+        env:
+          POD_ID: ${{ steps.tf.outputs.pod_id }}
+        run: |
+          chmod +x scripts/runpod-verify.sh
+          ./scripts/runpod-verify.sh
