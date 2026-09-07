@@ -20,23 +20,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download tfstate from latest RUNPOD-0002-Setup
+      - name: Download tfstate from latest apply
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          RUN_ID=$(gh run list \
-            --workflow RUNPOD-0002-Setup.yml \
-            --branch "${{ github.ref_name }}" \
-            --status success \
-            --limit 1 \
-            --json databaseId \
-            --jq '.[0].databaseId')
-          if [ -z "${RUN_ID}" ] || [ "${RUN_ID}" = "null" ]; then
-            echo "No successful RUNPOD-0002-Setup run on this branch. Run Setup first."
+          BR="${{ github.ref_name }}"
+          ALL=$(gh run list --workflow RUNPOD-ALL-SETUP-0001-EndToEnd.yml --branch "$BR" --limit 5 --json databaseId,updatedAt,status)
+          STEP=$(gh run list --workflow RUNPOD-0002-Setup.yml --branch "$BR" --status success --limit 1 --json databaseId,updatedAt,status)
+          RUN_ID=$(jq -n --argjson a "$ALL" --argjson b "$STEP" '
+            ($a + $b) | map(select(.status=="completed")) | max_by(.updatedAt) | .databaseId // empty
+          ')
+          if [ -z "${RUN_ID}" ]; then
+            echo "No successful Setup or ALL-SETUP run on this branch."
             exit 1
           fi
-          echo "Using Setup run ${RUN_ID}"
+          echo "Using apply run ${RUN_ID}"
           gh run download "${RUN_ID}" -n runpod-tfstate -D terraform/runpod
 
 

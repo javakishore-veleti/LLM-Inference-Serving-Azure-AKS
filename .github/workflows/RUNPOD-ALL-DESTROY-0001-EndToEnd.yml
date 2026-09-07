@@ -1,4 +1,4 @@
-name: RUNPOD-0004-Destroy
+name: RUNPOD-ALL-DESTROY-0001-EndToEnd
 
 on:
   workflow_dispatch:
@@ -14,9 +14,6 @@ permissions:
 jobs:
   destroy:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: terraform/runpod
     env:
       RUNPOD_API_KEY: ${{ secrets.RUNPOD_API_KEY }}
       TF_IN_AUTOMATION: "true"
@@ -24,7 +21,6 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Require RUNPOD_API_KEY
-        working-directory: .
         run: |
           if [ -z "${RUNPOD_API_KEY}" ]; then
             echo "Add repo secret RUNPOD_API_KEY."
@@ -32,7 +28,6 @@ jobs:
           fi
 
       - name: Download tfstate from latest apply
-        working-directory: .
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -50,17 +45,25 @@ jobs:
           echo "Using apply run ${RUN_ID}"
           gh run download "${RUN_ID}" -n runpod-tfstate -D terraform/runpod
 
-
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.13.3"
           terraform_wrapper: false
 
       - name: Terraform init
+        working-directory: terraform/runpod
         run: terraform init -input=false
 
       - name: Terraform destroy
+        working-directory: terraform/runpod
         run: terraform destroy -input=false -auto-approve
 
+      - name: List pods (after)
+        run: |
+          echo "==> GET /pods (after destroy)"
+          curl -sS -H "Authorization: Bearer ${RUNPOD_API_KEY}" \
+            https://rest.runpod.io/v1/pods \
+            | python3 -m json.tool
+
       - name: Summary
-        run: echo "Pod destroyed. GPU bill should be \$0. Confirm with RUNPOD-0001-CheckPods." >> "$GITHUB_STEP_SUMMARY"
+        run: echo "Pod destroyed. GPU bill should be \$0." >> "$GITHUB_STEP_SUMMARY"

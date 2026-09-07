@@ -10,13 +10,20 @@ Repo → **Settings** → **Secrets and variables** → **Actions** → **New re
 |---|---|
 | `RUNPOD_API_KEY` | [console.runpod.io/user/settings](https://console.runpod.io/user/settings) |
 
-## Run in order (Actions → workflow → Run workflow)
+## One-shot (Actions → workflow → Run workflow)
 
-1. **RUNPOD-0001-CheckPods** — lists existing pods (should be `[]` before setup)
-2. **RUNPOD-0002-Setup** — `terraform apply` (bills ~$0.22/hr)
-3. **RUNPOD-0003-Verify** — curl `/v1/models` and `/v1/completions` (waits for first boot)
-4. **RUNPOD-0004-Destroy** — `terraform destroy` (GPU → $0)
+1. **RUNPOD-ALL-SETUP-0001-EndToEnd** — list pods → `terraform apply` → curl `/v1/models` + `/v1/completions`
+2. **RUNPOD-ALL-DESTROY-0001-EndToEnd** — `terraform destroy` → list pods (GPU → $0)
 
-0003 and 0004 pull the `runpod-tfstate` artifact from the latest successful **RUNPOD-0002-Setup** run on the same branch. Do not re-run 0002 until 0004 has finished, or you can rent a second pod.
+GPU bills from apply until destroy. Do not run Setup twice without Destroy.
+
+## Step-by-step (same secret, same Terraform)
+
+1. **RUNPOD-0001-CheckPods** — lists existing pods
+2. **RUNPOD-0002-Setup** — `terraform apply` only
+3. **RUNPOD-0003-Verify** — curl only
+4. **RUNPOD-0004-Destroy** — `terraform destroy` only
+
+Destroy/verify pull `runpod-tfstate` from the latest successful **ALL-SETUP** or **0002-Setup** on this branch.
 
 Terraform lives in `terraform/runpod/`. State is **not** committed; it is the GitHub Actions artifact (kept 7 days).
