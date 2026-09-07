@@ -4,6 +4,8 @@ Cold start is not “the container is Running.” It is a short, ordered movie: 
 
 This walkthrough uses one real boot of **vLLM 0.22.1** serving **Qwen2.5-7B-Instruct-AWQ** (GitHub Actions → Runpod, 2026-09-07). Clock starts at `13:15:37` UTC. The OpenAI API is up at `13:17:44`. First `/v1/completions` returns **200** at `13:17:51`.
 
+How this file is used: the [RunPod Management](README.md#runpod-management) section in `README.md` (metrics, knobs, 10M/h Ready time, KV dashboards) is keyed off these lines. Commands to reproduce the boot: [`imp-commands-runpod.md`](imp-commands-runpod.md).
+
 ## Contents
 
 - [The two-minute movie](#the-two-minute-movie)

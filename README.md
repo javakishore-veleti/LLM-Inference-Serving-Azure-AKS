@@ -17,6 +17,7 @@ Provisioning a GPU on Azure AKS with Terraform, install the NVIDIA GPU Operator,
 - [You To Be A Golden Start of vLLM Management](#you-to-be-a-golden-start-of-vllm-management)
 - [RunPod Management](#runpod-management)
   - [GitHub Actions](#github-actions)
+  - [Boot log analysis](#boot-log-analysis)
   - [vLLM-specific metrics](#vllm-specific-metrics)
   - [Observability tools](#observability-tools)
   - [Configurations](#configurations)
@@ -142,7 +143,7 @@ That is the golden start of vLLM management: you can tell the story of a request
 
 Azure T4 quota blocked AKS (`NCasT4v3` 0/0). Same model and OpenAI API were served on a **Runpod community RTX 3090** instead. That is one Docker container, not Kubernetes. Image pin on GeForce hosts: `vllm/vllm-openai:v0.22.1-cu129` (plain `v0.22.1` is CUDA 13 and will not start).
 
-CLI runbook: `imp-commands-runpod.md`. Terraform: `terraform/runpod/`. Cold-start log walkthrough: `README_RUNPOD_LOGS_ANALSYS.md`.
+CLI runbook: [`imp-commands-runpod.md`](imp-commands-runpod.md). Terraform: `terraform/runpod/`. Every VRAM number, boot clock, and kernel choice below is from one real container log — walk it in [`README_RUNPOD_LOGS_ANALSYS.md`](README_RUNPOD_LOGS_ANALSYS.md).
 
 ### GitHub Actions
 
@@ -156,9 +157,31 @@ Secret: **`RUNPOD_API_KEY`** (repo Settings → Secrets and variables → Action
 
 Do not run Setup twice without Destroy. GPU bills from apply until destroy.
 
+The verify step is a 200 on `/v1/models` and `/v1/completions`, not pod `RUNNING`. Setup can still 502 while Hugging Face and `torch.compile` run — that movie is timed in [the two-minute log](README_RUNPOD_LOGS_ANALSYS.md#the-two-minute-movie) (`13:15:37` banner → `13:17:44` Uvicorn → `13:17:51` first completions).
+
+### Boot log analysis
+
+[`README_RUNPOD_LOGS_ANALSYS.md`](README_RUNPOD_LOGS_ANALSYS.md) is the primary source for this Runpod section. GitHub Actions captured one boot of **vLLM 0.22.1-cu129** / **Qwen2.5-7B-Instruct-AWQ** on 2026-09-07. Use it when a metric or knob below needs a “why,” not a guess.
+
+| In this Runpod section | In the log file |
+|---|---|
+| Verify 502 while the pod looks up | [The two-minute movie](README_RUNPOD_LOGS_ANALSYS.md#the-two-minute-movie) — HTTP is down until Uvicorn |
+| `/metrics` vs engine INFO every few seconds | [Two processes](README_RUNPOD_LOGS_ANALSYS.md#two-processes-not-one-python-script) — APIServer pid 95, EngineCore pid 348 |
+| Serve knobs (`max_model_len`, `max_num_seqs`, `0.90`) | [The banner](README_RUNPOD_LOGS_ANALSYS.md#the-banner-which-model-which-knobs) |
+| `quantization=awq` vs `awq_marlin` | [Hugging Face, safetensors, and AWQ](README_RUNPOD_LOGS_ANALSYS.md#hugging-face-safetensors-and-awq) |
+| Why FA2 / FlashInfer matter | [CUDA picks a team](README_RUNPOD_LOGS_ANALSYS.md#cuda-picks-a-team-nccl-flashattention-flashinfer) |
+| Weights **5.29 GiB**, second boot + HF volume | [Weights leave the Hub](README_RUNPOD_LOGS_ANALSYS.md#weights-leave-the-hub-and-occupy-vram) |
+| First-boot ~20 s compile, CUDA graphs | [torch.compile, then CUDA graphs](README_RUNPOD_LOGS_ANALSYS.md#torchcompile-then-cuda-graphs) |
+| KV **14.43 GiB / 270k tokens / ~66×** | [KV cache: why 7B is not “7B of GPU”](README_RUNPOD_LOGS_ANALSYS.md#kv-cache-why-7b-is-not-7b-of-gpu) |
+| `GET /` 404, `/v1/models` 200 | [The OpenAI door opens](README_RUNPOD_LOGS_ANALSYS.md#the-openai-door-opens) |
+| First completion latency spike | [Triton still had homework](README_RUNPOD_LOGS_ANALSYS.md#first-request-triton-still-had-homework) |
+| “Never scale to zero” (~2 min Ready) | [Where the two minutes went](README_RUNPOD_LOGS_ANALSYS.md#where-the-two-minutes-went) |
+
+System logs (image pull, `cuda>=13.0`) are **before** that file. If the container never prints a banner, you are not in the log analysis yet — delete and recreate with `v0.22.1-cu129`.
+
 ### vLLM-specific metrics
 
-The server already exposes `GET /metrics` (Prometheus text, prefix `vllm:`). Your boot also logged engine stats every few seconds.
+The server already exposes `GET /metrics` (Prometheus text, prefix `vllm:`). The same boot [logged engine stats](README_RUNPOD_LOGS_ANALSYS.md#first-request-triton-still-had-homework) every few seconds (`Avg prompt throughput`, `GPU KV cache usage`, `Prefix cache hit rate`). Those lines are a quiet-window average, not peak card speed. `/metrics` is what you scrape.
 
 **Engine (is the GPU busy?)**
 
@@ -193,7 +216,7 @@ curl -sf "https://${POD_ID}-8000.proxy.runpod.net/metrics" | head
 | Dashboards | vLLM’s example Grafana board (TTFT, TPOT, KV %, running/waiting) |
 | Traces | OpenTelemetry — `--otlp-traces-endpoint` (unset on the 2026-09-07 boot) |
 | GPU hardware | DCGM Exporter (`gpu_memory_used`, SM util) — this is why AKS + GPU Operator still matters |
-| Logs | Engine INFO; Triton JIT warnings on first request shapes |
+| Logs | Engine INFO; Triton JIT on first request shapes — [walk the lines](README_RUNPOD_LOGS_ANALSYS.md#first-request-triton-still-had-homework) |
 
 ### Configurations
 
@@ -205,10 +228,10 @@ Serve knobs already used in this lab: `gpu_memory_utilization=0.90`, `max_model_
 | `--otlp-traces-endpoint` | Per-request traces. |
 | `--collect-detailed-traces=model\|worker\|all` | Heavier traces for debugging. |
 | `--generation-config vllm` | Ignore Qwen’s `generation_config.json` defaults. |
-| `quantization=awq_marlin` | Faster AWQ kernels (the boot log suggested this). |
+| `quantization=awq_marlin` | Faster AWQ kernels ([the boot log suggested this](README_RUNPOD_LOGS_ANALSYS.md#hugging-face-safetensors-and-awq)) |
 | Prefix caching (on in V1) | Pays off only if the **router** keeps similar prefixes on the same replica. |
 
-`--gpu-memory-utilization` is not “90% for weights.” Weights are ~5.3 GiB on this AWQ 7B. The rest of the budget is **KV cache** (14.43 GiB on the 3090 boot) plus CUDA graphs.
+`--gpu-memory-utilization` is not “90% for weights.” Weights are ~5.3 GiB on this AWQ 7B. The rest of the budget is **KV cache** ([**14.43 GiB / 270,144 tokens** on the 3090 boot](README_RUNPOD_LOGS_ANALSYS.md#kv-cache-why-7b-is-not-7b-of-gpu)) plus CUDA graphs.
 
 ### 10 million requests per hour
 
@@ -251,7 +274,7 @@ Scrape every replica’s `/metrics` into Prometheus (PodMonitor / ServiceMonitor
 | Completions | `vllm:request_success_total` by `stop` / `length` / `abort` | `abort` up = overload or client disconnect |
 | GPU card | DCGM `DCGM_FI_DEV_GPU_UTIL`, `DCGM_FI_DEV_FB_USED`, temperature, power | Confirms the engine, not just HTTP |
 
-HPA/KEDA should target **waiting requests** and **KV %**, with a floor of warm replicas (never scale this fleet to zero — cold start was ~2 minutes in the 2026-09-07 boot).
+HPA/KEDA should target **waiting requests** and **KV %**, with a floor of warm replicas (never scale this fleet to zero — cold start was [~2 minutes in the 2026-09-07 boot](README_RUNPOD_LOGS_ANALSYS.md#where-the-two-minutes-went)).
 
 Synthetic canaries every 10–30 s: `GET /health`, `GET /v1/models`, one tiny `POST /v1/completions`. Record canary TTFT separately from user traffic.
 
@@ -286,7 +309,7 @@ After failover, watch TTFT p95 and prefix-hit ratio in the surviving region — 
 
 #### KV cache, metrics, and dashboards
 
-KV is the concurrency ceiling. On the T4 lab card ~7.32 GiB KV; on the 3090 boot **14.43 GiB / 270k tokens**. When `kv_cache_usage_perc` → 1.0, vLLM **preempts** sequences. That shows up as TTFT/e2e cliffs, not as “OOM killed.”
+KV is the concurrency ceiling. On the T4 lab card ~7.32 GiB KV; on the 3090 boot [**14.43 GiB / 270k tokens**](README_RUNPOD_LOGS_ANALSYS.md#kv-cache-why-7b-is-not-7b-of-gpu). When `kv_cache_usage_perc` → 1.0, vLLM **preempts** sequences. That shows up as TTFT/e2e cliffs, not as “OOM killed.”
 
 **Grafana dashboards to build** (Prometheus scrape of `vllm:*` + DCGM + gateway):
 
