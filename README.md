@@ -1,6 +1,8 @@
 # LLM-Inference-Serving-Azure-AKS
 
-Provisioning a GPU on Azure AKS with Terraform, install the NVIDIA GPU Operator, and server Qwen2.5-7B-instruct-AWQ through vLLM's OpenAI-compatible API - a production shaped inference endpoint, reachable via curl /v1/completions
+Deploy **vLLM** serving for **Qwen2.5-7B-Instruct-AWQ** on **Azure AKS**, **Runpod**, or both — same OpenAI-compatible door: `POST /v1/completions`.
+
+Azure AKS: Terraform, NVIDIA GPU Operator, GPU node pool. Runpod: a pinned `vllm/vllm-openai` container on a GPU host (this lab: community RTX 3090) when AKS quota is unavailable. Clients hit `/v1/completions` on whichever path is live.
 
 ![LLM Inference Serving](docs/images/hero-llm-inference-serving.png)
 
