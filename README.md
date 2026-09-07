@@ -52,9 +52,9 @@ The cost is cold start. The driver DaemonSet must pull, install and pass health 
 | Weights + runtime overhead | ~ 5.97 GiB |
 | Available KV Cache | 7.32 GiB |
 
+KV Cache - not weights - sets the concurrency ceiling. KV Cache is useful for concurrency.
 
 ## Pinned Versions
-
 | Component | Pin |
 | --- | --- |
 | Terraform | ~> 1.15 |
@@ -69,8 +69,6 @@ The cost is cold start. The driver DaemonSet must pull, install and pass health 
 | Model | Qwen/Qwen2.5-7B-Instract-AWQ (ungate - no HF token needed) |
 
 Pinning the vLLM image matters more than it looks: :latest changes engine defaults under you, and a config that worked yesterday OOMs today. On a 15GiB card that margin is thin.
-
-
 
 ### This repo UV Setup on Macbook
 ```shell
