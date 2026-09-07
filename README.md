@@ -14,12 +14,18 @@ Provisioning a GPU on Azure AKS with Terraform, install the NVIDIA GPU Operator,
   - [Measured memory at --gpu-memory-utilization=0.90](#measured-memory-at---gpu-memory-utilization090)
 - [Pinned Versions](#pinned-versions)
   - [This repo UV Setup on Macbook](#this-repo-uv-setup-on-macbook)
+- [You To Be A Golden Start of vLLM Management](#you-to-be-a-golden-start-of-vllm-management)
 - [RunPod Management](#runpod-management)
   - [GitHub Actions](#github-actions)
   - [vLLM-specific metrics](#vllm-specific-metrics)
   - [Observability tools](#observability-tools)
   - [Configurations](#configurations)
-  - [100k requests per hour](#100k-requests-per-hour)
+  - [10 million requests per hour](#10-million-requests-per-hour)
+    - [How many pods](#how-many-pods)
+    - [How to track](#how-to-track)
+    - [Availability](#availability)
+    - [Regional failover](#regional-failover)
+    - [KV cache, metrics, and dashboards](#kv-cache-metrics-and-dashboards)
   - [Cluster of vLLM, API router, load balancer](#cluster-of-vllm-api-router-load-balancer)
 - [References](#references)
 
@@ -108,6 +114,30 @@ uv add torch torchvision vllm transformers streamlit requests pyairports xformer
 
 ```
 
+## You To Be A Golden Start of vLLM Management
+
+This is not a tutorial. It is the story of the same model, the same OpenAI door, and the difference between “I got a 200 once” and **owning** a vLLM deployment — on Runpod first, then anywhere GPUs live.
+
+You start where everyone starts. Azure will not give you a T4. Quota is `0/0`. So you rent a community RTX 3090 on Runpod and you type `vllm serve`. You feel close. The pod says `RUNNING`. You curl `/` and get **404**. You wait. The GPU is already billing.
+
+That 404 is the first chapter. vLLM never lived at `/`. The door is `/v1/models` and `/v1/completions`. Runpod’s probe knocks on the wrong room and you think the house is empty. A golden start learns the **HTTP contract** before the model name: health, models, completions, chat, metrics. `GET /` is a ghost. `--host 0.0.0.0` and `8000/http` must exist **at create**; you cannot bolt a port onto a living pod.
+
+The second chapter is a silent bill. You pin `vllm/vllm-openai:v0.22.1` because that is the lab image. The host driver is older. `nvidia-container-cli: cuda>=13.0`. Python never starts. There is no banner, no Uvicorn, no KV line. The card is still yours until you **delete**. Community GeForce wants **`v0.22.1-cu129`**. You do not set `NVIDIA_DISABLE_REQUIRE` to “make it work.” You match image to driver, or you pay for a brick. `:latest` is how yesterday’s config OOMs today.
+
+You recreate. Now the story has two clocks. Docker is still pulling when the UI says running. Then pid 95 prints a banner and you think you are served. You are not. Hugging Face is copying **5.19 GiB**. Inductor is compiling for twenty seconds. CUDA graphs are being recorded on **this** GPU. Only `Application startup complete` plus a 200 on `/v1/models` is Ready. Curl during the movie is 502. The first real completion still JIT-compiles a Triton kernel. Warmup is a character in the plot, not a footnote. Mount `/root/.cache/huggingface` so the second night does not re-download the same weights. Compile cache lives there too. Graphs do not travel between SKUs.
+
+While you wait you learn what a 7B actually is. The name sounds like seven billion parameters of GPU. AWQ packed the weights into **5.29 GiB**. The rest of the 90% budget is not “headroom.” It is the **KV cache** — 14.43 GiB, 270k tokens, enough in theory for ~66 full 4096-token lives. `max_num_seqs=8` is you choosing latency over greed. `--gpu-memory-utilization=0.90` never meant “90% for weights.” When `kv_cache_usage_perc` walks to 1.0 the engine **preempts**. TTFT falls off a cliff and nobody OOM-killed. That is the SME sentence: **KV is the product; weights are the rent.**
+
+You pick knobs like product, not flags. `max_model_len` is how much conversation you sell per request, and how many people share the arena. Quantization must match the checkpoint; the log offers `awq_marlin` for speed and you A/B it instead of arguing. Prefix cache is on in V1 and worth nothing if a round-robin balancer sprays one system prompt across two hundred strangers. `generation_config.json` will raise temperature behind your back unless the client or `--generation-config vllm` owns sampling. `--served-model-name` is the name your app can keep when you change Hub ids. `--api-key` exists because the proxy URL is otherwise the password. `--disable-log-requests` exists because prompts in logs are an incident. `--trust-remote-code` is supply chain. `--wait` on Runpod is SSH, not the model.
+
+You learn money the same day. Stock moves faster than price. 4090 plus `--public-ip` plus `--wait` is sold out. 3090 without a public IP starts. Disk and volume add pennies; the GPU is the meter. `stop` is a pause. `delete` is zero. A failed CUDA pod that never booted is not free. Image, ports, and docker-args are immutable: wrong CUDA means a new pod, not an edit.
+
+Then traffic arrives — not one Hello, ten million an hour in your head. 10M/h is **~2,778 RPS**. This replica holds about **ten**. You do not buy a bigger load balancer. You clone the unit you just understood: one GPU, one EngineCore, one KV arena. Two hundred eighty of them, plus headroom, plus a second region if a datacenter can vanish. Round-robin at that scale is spraying sessions across databases. The router must love **prefix locality and KV load**. Failover cannot copy KV to another continent; the surviving region is cold in the cache and hot in TTFT until it warms. You scrape `vllm:*` and DCGM. You page on **waiting, KV %, TTFT p95**, not CPU. You never scale this fleet to zero if the SLO cannot eat a two-minute boot.
+
+You also know when the story leaves Runpod. One container proved the OpenAI door. Instant Clusters are not Kubernetes. Regional Front Door, PDB, HPA on waiting, DCGM on every node, canary images — that is AKS (when quota exists). Serverless Hub is a different API and a different cold start. Gold on **one** GPU is a pin, a volume, a real Ready, a key, `/metrics`, and a delete. Gold **in general** is that replica as a cell you can clone without lying to yourself about KV, CUDA, or the bill.
+
+That is the golden start of vLLM management: you can tell the story of a request from driver check to first token, and you know which chapter is on fire.
+
 ## RunPod Management
 
 Azure T4 quota blocked AKS (`NCasT4v3` 0/0). Same model and OpenAI API were served on a **Runpod community RTX 3090** instead. That is one Docker container, not Kubernetes. Image pin on GeForce hosts: `vllm/vllm-openai:v0.22.1-cu129` (plain `v0.22.1` is CUDA 13 and will not start).
@@ -180,31 +210,115 @@ Serve knobs already used in this lab: `gpu_memory_utilization=0.90`, `max_model_
 
 `--gpu-memory-utilization` is not “90% for weights.” Weights are ~5.3 GiB on this AWQ 7B. The rest of the budget is **KV cache** (14.43 GiB on the 3090 boot) plus CUDA graphs.
 
-### 100k requests per hour
+### 10 million requests per hour
 
-100 000 ÷ 3 600 ≈ **27.8 requests/second** (~1 667/min). That is a *request* rate. Capacity is **tokens × batching**.
+10 000 000 ÷ 3 600 ≈ **2 778 requests/second** (~167 k/min). That is a *request* rate. Capacity is still **tokens × batching**. An hourly average also hides a 3–5× spike, so you size for **~8 000 RPS peak**, not only 2 778.
 
-This lab replica (`max_num_seqs=8`, 32-token completions) can sit in the tens of RPS if prompts are short. If each request takes ~0.7–1 s of GPU time, 8 slots give roughly **8–12 RPS** sustained. **28 RPS of that shape is about 2–4 GPUs**, plus headroom for peaks (an hourly average hides a 3–5× spike). Long prompts or 512-token answers need more replicas, not a faster load balancer.
+This lab replica (`max_num_seqs=8`, ~32-token completions, ~0.7–1 s GPU time per request) holds roughly **8–12 RPS**. Use **10 RPS per GPU replica** as the planning number until you load-test. Long prompts or 512-token answers collapse that number; shared system prompts with a KV-aware router raise it.
+
+A single Runpod container cannot do this. At this QPS you need **Kubernetes in more than one region**, a real inference router, and dashboards that watch KV — not CPU.
+
+#### How many pods
+
+One vLLM process = one GPU = one replica for this 7B AWQ (`tensor_parallel_size=1`). AKS `Standard_NC4as_T4_v3` is also one T4 per node. Count **replicas ≈ GPU nodes**.
+
+| Traffic shape (7B AWQ, `max_num_seqs=8`) | Sustained 2 778 RPS | Peak ~8 000 RPS |
+|---|---|---|
+| Short 32-token completions (~10 RPS/replica) | **~280 replicas** | **~800 replicas** |
+| Conservative (~8 RPS/replica) | ~350 | ~1 000 |
+| Optimistic (~12 RPS, heavy prefix cache hits) | ~230 | ~670 |
+| 512-token answers (decode-bound) | 4–8× more GPUs | same |
+
+Add **~15–20% headroom** for rollouts, node drains, and one AZ blip: plan **~330 warm replicas** for the 2 778 RPS average, **~950** if you must absorb the 3× peak without shedding.
+
+Token math (why request-count lies): 10M requests × (100 prompt + 32 output) tokens ≈ **367k tokens/s**. Decode on this card is on the order of a few hundred tok/s per GPU at batch 8. If output length doubles, GPU count doubles. Measure `generation_tokens_total` in a load test before you buy quota.
+
+Cost sanity (community 3090 ~$0.22/hr as of 2026-09-07): 280 GPUs ≈ **$62/hr** idle-busy, ~$45k/month. Azure T4 nodes cost more and need **quota** (`NCasT4v3` is 0/0 in this lab until you raise it). Prefill/decode split and prefix-aware routing are how you *reduce* that count, not a fancier TCP load balancer.
+
+#### How to track
+
+Scrape every replica’s `/metrics` into Prometheus (PodMonitor / ServiceMonitor). Scale and page off **queue + KV + TTFT**, not “CPU 80%.”
+
+| Signal | PromQL-style idea | Action |
+|---|---|---|
+| Offered load | `sum(rate(vllm:prompt_tokens_total[1m]))` and HTTP RPS on `/v1/completions` | Compare to 2 778 RPS / token budget |
+| Queue (scale out) | `sum(vllm:num_requests_waiting)` | Waiting > 0 for 1–2 min → more replicas |
+| In-flight batch | `sum(vllm:num_requests_running)` vs `max_num_seqs` (8) | Flat at 8 + waiting up = saturated |
+| KV fill | `avg(vllm:kv_cache_usage_perc)` and `max(...)` | > 0.80–0.85 → preemption; add replicas or cut `max_model_len` |
+| Prefix reuse | `rate(vllm:prefix_cache_hits[5m]) / rate(vllm:prefix_cache_queries[5m])` | Low hit ratio + shared system prompt → router is spraying |
+| TTFT / TPOT | `histogram_quantile(0.95, rate(vllm:time_to_first_token_seconds_bucket[5m]))` and `inter_token_latency_seconds` | User-visible SLO |
+| Where time went | `request_queue_time_seconds` vs `_prefill_` vs `_decode_` | Queue → capacity; prefill → prompt length; decode → output length |
+| Completions | `vllm:request_success_total` by `stop` / `length` / `abort` | `abort` up = overload or client disconnect |
+| GPU card | DCGM `DCGM_FI_DEV_GPU_UTIL`, `DCGM_FI_DEV_FB_USED`, temperature, power | Confirms the engine, not just HTTP |
+
+HPA/KEDA should target **waiting requests** and **KV %**, with a floor of warm replicas (never scale this fleet to zero — cold start was ~2 minutes in the 2026-09-07 boot).
+
+Synthetic canaries every 10–30 s: `GET /health`, `GET /v1/models`, one tiny `POST /v1/completions`. Record canary TTFT separately from user traffic.
+
+#### Availability
+
+Make the *API* available, not a single pod.
+
+- **Readiness:** only Ready after the OpenAI door is up (`/health` + `/v1/models`). Curl during weight download or `torch.compile` is 502; keep those pods out of the Service.
+- **Liveness:** restart if `/health` dies; do not restart just because TTFT is slow (that is load).
+- **PDB:** `maxUnavailable: 1` (or a small %) so a drain cannot take 50 GPUs at once.
+- **Multi-AZ:** GPU node pool in at least two availability zones. One AZ loss should drop capacity, not DNS.
+- **Rollouts:** max surge small; new pods take minutes to become Ready. Canary a new vLLM image on 5% of replicas and watch TTFT/KV before 100%.
+- **Shed, don’t melt:** at the gateway, 429/503 + `Retry-After` when waiting or KV is past SLO. Infinite queues make TTFT unbounded.
+- **Min replicas:** keep the 330-class floor warm 24/7 if 10M/h is a hard SLO. Scale-from-zero misses the first two minutes of every spike.
+- **Single-replica Runpod** is a lab. Production is many replicas behind a router plus a second region.
+
+#### Regional failover
+
+KV cache is **in GPU RAM on that replica**. It does not replicate to another region. Failover always means a **cold cache** and a TTFT spike in the surviving region.
+
+| Pattern | What it is | When |
+|---|---|---|
+| Active-active | Azure Front Door (or Traffic Manager) splits to two AKS clusters (e.g. East US + West US). Each region has its own replicas, router, Prometheus. | 10M/h. Users stay local; one region dying loses ~50% capacity unless you overprovision. |
+| Active-passive | Primary takes 100%. Secondary holds a **warm** 20–30% fleet (not zero). Health probe fails → Front Door flips. | Cheaper. Capacity hole after failover unless you scale out fast *and* have GPU quota waiting. |
+| DNS-only | Low TTL + Traffic Manager | Works, but TTL and client caches delay failover. Prefer Front Door anycast. |
+
+What must exist in **both** regions: GPU quota, node pool, GPU Operator, model weights on disk or a regional cache (do not re-download 5.19 GiB from Hugging Face during an outage), the same vLLM image pin, a local inference router. Weights and KV are not a global database.
+
+Probe the **data plane** (`/health` on the gateway), not only the AKS API. A region with Ready nodes and a wedged engine is still down.
+
+After failover, watch TTFT p95 and prefix-hit ratio in the surviving region — both get worse until KV warms. If 10M/h must survive a full region loss, run **~2× the 280 replica count** split across regions (active-active at 140+140 is *not* enough; you need ~280+280 or fast scale + spare quota).
+
+#### KV cache, metrics, and dashboards
+
+KV is the concurrency ceiling. On the T4 lab card ~7.32 GiB KV; on the 3090 boot **14.43 GiB / 270k tokens**. When `kv_cache_usage_perc` → 1.0, vLLM **preempts** sequences. That shows up as TTFT/e2e cliffs, not as “OOM killed.”
+
+**Grafana dashboards to build** (Prometheus scrape of `vllm:*` + DCGM + gateway):
+
+1. **SLO / golden signals** — RPS vs 2 778 target; prompt+generation tok/s; TTFT p50/p95/p99; TPOT p50/p95; e2e p95; success vs abort vs length. Alert: p95 TTFT over SLO for 5 min; abort rate; canary failing.
+2. **Engine saturation** — `num_requests_running` (stack per replica), `num_requests_waiting`, **KV usage %** (avg + max + heatmap per pod), prefix cache hit ratio. Alert: waiting > 0; KV max > 0.85; running pinned at 8.
+3. **Where latency went** — queue vs prefill vs decode time (histograms). Queue-dominated → not enough GPUs. Prefill-dominated → prompts too long or no prefix locality. Decode-dominated → `max_tokens` too high.
+4. **Router / fairness** — QPS, KV %, and prefix hits **per replica**. If one pod is at KV 0.9 and another at 0.2, round-robin is the bug. llm-d / Gateway API Inference Extension should flatten that heatmap.
+5. **GPU hardware (DCGM)** — SM util, framebuffer used vs vLLM KV, temperature, ECC, power. Low SM + high waiting → scheduler/router problem. High SM + high KV → you need more cards.
+6. **Fleet / HA** — replica Ready count vs HPA desired; pods not Ready (compile/download); PDB/evictions; **per-region** RPS and error rate; Front Door backend health. Alert: Ready replicas < floor; one region 5xx; failover event.
+
+Use vLLM’s example Grafana board as the seed for (1)–(3), then add DCGM and the per-replica KV heatmap. Optional: OpenTelemetry traces (`--otlp-traces-endpoint`) sampled at 0.1–1% — 10M traces/hour is not a dashboard, it is a bill.
 
 ### Cluster of vLLM, API router, load balancer
 
 Two different “clusters”:
 
 1. **One replica, many GPUs** — `tensor_parallel_size` / `pipeline_parallel_size`. One HTTP endpoint. Use when the model does not fit one card (not this 7B AWQ).
-2. **Many replicas** — what 100k/hour needs. Then something must sit in front.
+2. **Many replicas** — what 10M/hour needs (~hundreds of GPUs). Then something must sit in front.
 
 | Front door | When |
 |---|---|
-| K8s Service / nginx / cloud LB (round-robin) | Simple. Fine at low QPS. **Breaks prefix cache** — each replica has its own KV. |
-| vLLM `--data-parallel-size` + internal API-server scale-out | One logical engine group, internal LB. |
-| Gateway API Inference Extension / **llm-d** / Envoy + Endpoint Picker | Production: route by **KV load + prefix locality**, not TCP round-robin. |
-| Prefill/decode split | Huge traffic. Overkill for ~28 RPS of 7B. |
+| K8s Service / nginx / cloud LB (round-robin) | Lab only. **Breaks prefix cache** — each replica has its own KV. At 2 778 RPS this wastes a large fraction of the fleet. |
+| vLLM `--data-parallel-size` + internal API-server scale-out | One logical engine group, internal LB. Still one region. |
+| Gateway API Inference Extension / **llm-d** / Envoy + Endpoint Picker | Required at this scale: route by **KV load + prefix locality**, not TCP round-robin. |
+| Prefill/decode split | In play at 10M/h if prefill is the bottleneck (long prompts, low prefix hits). Separate prefill pool from decode pool. |
+| Azure Front Door / Traffic Manager | Regional HA in front of the inference router, not instead of it. |
 
 Yes, there is an API router. A generic L4/L7 balancer is only half of it. Inference-aware routing exists because **KV cache is sticky**. Round-robin is like spraying sessions across databases with no affinity.
 
-For ~28 RPS of short 7B AWQ completions: start with **2–4 replicas** behind a Service, scrape `/metrics`, watch `kv_cache_usage_perc` and `num_requests_waiting`. If a shared system prompt must hit prefix cache, move to prefix-aware routing (llm-d / Inference Gateway).
+For ~2 778 RPS of short 7B AWQ completions: **~280 replicas** (floor ~330) behind a KV-aware router, scrape `/metrics`, watch `kv_cache_usage_perc`, `num_requests_waiting`, and TTFT p95. Put the same shape in a second region if a regional outage is in the SLO. If a shared system prompt must hit prefix cache, round-robin will not get you there.
 
-A Runpod pod is **one replica, no router**. Kubernetes is what you add when you want a Service, HPA, DCGM, and a real front door.
+A Runpod pod is **one replica, no router**. Kubernetes is what you add when you want a Service, HPA, DCGM, a real front door, and a second region.
 
 ## References
 https://www.youtube.com/watch?v=EyXzfnAxCdA
