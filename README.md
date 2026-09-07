@@ -2,6 +2,8 @@
 
 Provisioning a GPU on Azure AKS with Terraform, install the NVIDIA GPU Operator, and server Qwen2.5-7B-instruct-AWQ through vLLM's OpenAI-compatible API - a production shaped inference endpoint, reachable via curl /v1/completions
 
+![LLM Inference Serving](docs/images/hero-llm-inference-serving.png)
+
 ## Table of Contents
 
 - [Why self-hosting LLM Serving instead of calling Frontir Model(s) API?](#why-self-hosting-llm-serving-instead-of-calling-frontir-models-api)
@@ -46,6 +48,8 @@ Provisioning a GPU on Azure AKS with Terraform, install the NVIDIA GPU Operator,
 You cannot self-host a closed model - there are no weights to put on a GPU. That is why this repo serves Qwen, an open-weight model.
 
 ## vLLM Model Serving on Azure AKS
+
+![Azure AKS GPU inference](docs/images/azure-aks-gpu-inference.png)
 
 ### Why Kubernetes?
 A single GPU box running python -m vllm... would serve tokens too. Kubernetes earns its place on what comes after:
@@ -141,6 +145,8 @@ You also know when the story leaves Runpod. One container proved the OpenAI door
 That is the golden start of vLLM management: you can tell the story of a request from driver check to first token, and you know which chapter is on fire.
 
 ## RunPod Management
+
+![Runpod single GPU vLLM](docs/images/runpod-single-gpu.png)
 
 Azure T4 quota blocked AKS (`NCasT4v3` 0/0). Same model and OpenAI API were served on a **Runpod community RTX 3090** instead. That is one Docker container, not Kubernetes. Image pin on GeForce hosts: `vllm/vllm-openai:v0.22.1-cu129` (plain `v0.22.1` is CUDA 13 and will not start).
 
@@ -405,6 +411,8 @@ KV is the concurrency ceiling. On the T4 lab card ~7.32 GiB KV; on the 3090 boot
 Use vLLM’s example Grafana board as the seed for (1)–(3), then add DCGM and the per-replica KV heatmap. Optional: OpenTelemetry traces (`--otlp-traces-endpoint`) sampled at 0.1–1% — 10M traces/hour is not a dashboard, it is a bill.
 
 ### Cluster of vLLM, API router, load balancer
+
+![Runpod multi-replica vLLM serving](docs/images/runpod-multi-gpu.png)
 
 Two different “clusters”:
 
