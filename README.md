@@ -85,8 +85,109 @@ uv add torch torchvision vllm transformers streamlit requests pyairports xformer
 
 ```
 
-### References
+## RunPod Management
+
+Azure T4 quota blocked AKS (`NCasT4v3` 0/0). Same model and OpenAI API were served on a **Runpod community RTX 3090** instead. That is one Docker container, not Kubernetes. Image pin on GeForce hosts: `vllm/vllm-openai:v0.22.1-cu129` (plain `v0.22.1` is CUDA 13 and will not start).
+
+CLI runbook: `imp-commands-runpod.md`. Terraform: `terraform/runpod/`. Cold-start log walkthrough: `README_RUNPOD_LOGS_ANALSYS.md`.
+
+### GitHub Actions
+
+Secret: **`RUNPOD_API_KEY`** (repo Settings → Secrets and variables → Actions).
+
+| Workflow | What it does |
+|---|---|
+| `RUNPOD-ALL-SETUP-0001-EndToEnd` | List pods → `terraform apply` → curl `/v1/models` + `/v1/completions` |
+| `RUNPOD-ALL-DESTROY-0001-EndToEnd` | `terraform destroy` → list pods (GPU bill → $0) |
+| `RUNPOD-0001` … `0004` | Same steps, one workflow each |
+
+Do not run Setup twice without Destroy. GPU bills from apply until destroy.
+
+### vLLM-specific metrics
+
+The server already exposes `GET /metrics` (Prometheus text, prefix `vllm:`). Your boot also logged engine stats every few seconds.
+
+**Engine (is the GPU busy?)**
+
+| Metric | Why it matters |
+|---|---|
+| `vllm:num_requests_running` / `_waiting` | In a batch vs queued. Waiting up → another replica or less load. |
+| `vllm:kv_cache_usage_perc` | KV arena fill. Near 1.0 → preemption, not “CPU 80%.” |
+| `vllm:prefix_cache_hits` / `_queries` | Shared-prompt reuse. High hits mean round-robin LB wastes KV. |
+| `vllm:prompt_tokens_total` / `generation_tokens_total` | Real work. Scale on **tokens/s**, not request count. |
+
+**Request SLOs (histograms)**
+
+| Metric | Meaning |
+|---|---|
+| `vllm:time_to_first_token_seconds` | **TTFT** — prefill + queue. Chat UX. |
+| `vllm:inter_token_latency_seconds` | **TPOT** — time per output token. Streaming. |
+| `vllm:e2e_request_latency_seconds` | Whole request. |
+| `vllm:request_queue_time_seconds` / `_prefill_` / `_decode_` | Where the seconds went. |
+| `vllm:request_success_total` | `stop` vs `length` vs `abort`. |
+
+Plus FastAPI HTTP counters on `/v1/completions`. After the server is up:
+
+```bash
+curl -sf "https://${POD_ID}-8000.proxy.runpod.net/metrics" | head
+```
+
+### Observability tools
+
+| Layer | Tool |
+|---|---|
+| Scrape `/metrics` | Prometheus (or Grafana Alloy / OpenTelemetry Collector) |
+| Dashboards | vLLM’s example Grafana board (TTFT, TPOT, KV %, running/waiting) |
+| Traces | OpenTelemetry — `--otlp-traces-endpoint` (unset on the 2026-09-07 boot) |
+| GPU hardware | DCGM Exporter (`gpu_memory_used`, SM util) — this is why AKS + GPU Operator still matters |
+| Logs | Engine INFO; Triton JIT warnings on first request shapes |
+
+### Configurations
+
+Serve knobs already used in this lab: `gpu_memory_utilization=0.90`, `max_model_len=4096`, `max_num_seqs=8`, `quantization=awq`, `dtype=float16`.
+
+| Extra | Effect |
+|---|---|
+| `--disable-log-stats` | Quieter logs; `/metrics` stays. |
+| `--otlp-traces-endpoint` | Per-request traces. |
+| `--collect-detailed-traces=model\|worker\|all` | Heavier traces for debugging. |
+| `--generation-config vllm` | Ignore Qwen’s `generation_config.json` defaults. |
+| `quantization=awq_marlin` | Faster AWQ kernels (the boot log suggested this). |
+| Prefix caching (on in V1) | Pays off only if the **router** keeps similar prefixes on the same replica. |
+
+`--gpu-memory-utilization` is not “90% for weights.” Weights are ~5.3 GiB on this AWQ 7B. The rest of the budget is **KV cache** (14.43 GiB on the 3090 boot) plus CUDA graphs.
+
+### 100k requests per hour
+
+100 000 ÷ 3 600 ≈ **27.8 requests/second** (~1 667/min). That is a *request* rate. Capacity is **tokens × batching**.
+
+This lab replica (`max_num_seqs=8`, 32-token completions) can sit in the tens of RPS if prompts are short. If each request takes ~0.7–1 s of GPU time, 8 slots give roughly **8–12 RPS** sustained. **28 RPS of that shape is about 2–4 GPUs**, plus headroom for peaks (an hourly average hides a 3–5× spike). Long prompts or 512-token answers need more replicas, not a faster load balancer.
+
+### Cluster of vLLM, API router, load balancer
+
+Two different “clusters”:
+
+1. **One replica, many GPUs** — `tensor_parallel_size` / `pipeline_parallel_size`. One HTTP endpoint. Use when the model does not fit one card (not this 7B AWQ).
+2. **Many replicas** — what 100k/hour needs. Then something must sit in front.
+
+| Front door | When |
+|---|---|
+| K8s Service / nginx / cloud LB (round-robin) | Simple. Fine at low QPS. **Breaks prefix cache** — each replica has its own KV. |
+| vLLM `--data-parallel-size` + internal API-server scale-out | One logical engine group, internal LB. |
+| Gateway API Inference Extension / **llm-d** / Envoy + Endpoint Picker | Production: route by **KV load + prefix locality**, not TCP round-robin. |
+| Prefill/decode split | Huge traffic. Overkill for ~28 RPS of 7B. |
+
+Yes, there is an API router. A generic L4/L7 balancer is only half of it. Inference-aware routing exists because **KV cache is sticky**. Round-robin is like spraying sessions across databases with no affinity.
+
+For ~28 RPS of short 7B AWQ completions: start with **2–4 replicas** behind a Service, scrape `/metrics`, watch `kv_cache_usage_perc` and `num_requests_waiting`. If a shared system prompt must hit prefix cache, move to prefix-aware routing (llm-d / Inference Gateway).
+
+A Runpod pod is **one replica, no router**. Kubernetes is what you add when you want a Service, HPA, DCGM, and a real front door.
+
+## References
 https://www.youtube.com/watch?v=EyXzfnAxCdA
 https://github.com/shiqs90/vllm-serving-aks
 https://github.com/vishakhasadhwani/llm-deployment-demo
+https://docs.vllm.ai/en/latest/usage/metrics/
+https://github.com/vllm-project/vllm/blob/main/docs/design/metrics.md
+https://github.com/llm-d/llm-d
 
