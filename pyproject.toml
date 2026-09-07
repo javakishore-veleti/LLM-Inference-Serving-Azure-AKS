@@ -1,5 +1,5 @@
 [project]
-name = "llm-inference-serving-azure-aks"
+name = "llm-inference-serving-azure-runpod"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"

@@ -1,4 +1,4 @@
-# LLM-Inference-Serving-Azure-AKS
+# LLM-Inference-Serving-Azure-RUNPOD
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](https://www.python.org/)
@@ -11,9 +11,9 @@
 [![Runpod](https://img.shields.io/badge/Runpod-GPU-7B2D8E)](https://www.runpod.io/)
 [![Kubernetes](https://img.shields.io/badge/Kubernetes-326CE5?logo=kubernetes&logoColor=white)](https://kubernetes.io/)
 [![NVIDIA](https://img.shields.io/badge/GPU-NVIDIA-76B900?logo=nvidia&logoColor=white)](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/index.html)
-[![GitHub last commit](https://img.shields.io/github/last-commit/javakishore-veleti/LLM-Inference-Serving-Azure-AKS)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-AKS/commits/main)
-[![GitHub issues](https://img.shields.io/github/issues/javakishore-veleti/LLM-Inference-Serving-Azure-AKS)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-AKS/issues)
-[![GitHub stars](https://img.shields.io/github/stars/javakishore-veleti/LLM-Inference-Serving-Azure-AKS)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-AKS/stargazers)
+[![GitHub last commit](https://img.shields.io/github/last-commit/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD/commits/main)
+[![GitHub issues](https://img.shields.io/github/issues/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD/issues)
+[![GitHub stars](https://img.shields.io/github/stars/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD/stargazers)
 
 **LLM inference serving** is keeping trained weights on a GPU and turning live HTTP requests into generated tokens. Training is over. This is the production path: many callers at once, a stable API, time-to-first-token, and VRAM spent on the **KV cache** (the conversation so far), not on fitting the model once.
 
