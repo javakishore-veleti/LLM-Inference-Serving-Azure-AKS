@@ -9,6 +9,21 @@ GPU here is a community **RTX 3090 / 4090** (~16–24 GiB), not Azure T4.
 **Image pin on community GPUs:** `vllm/vllm-openai:v0.22.1-cu129` (CUDA 12.9).
 Plain `v0.22.1` is CUDA 13.0 and will not start on typical community GeForce drivers (see trap under step 3).
 
+## Contents
+
+- [0. Delete the failed CUDA-13 3090](#0-delete-the-failed-cuda-13-3090--it-still-bills)
+- [1. One-time setup](#1-one-time-setup)
+  - [1.1 Install the CLI](#11-install-the-cli)
+  - [1.2 API key](#12-api-key)
+- [2. Pre-flight — pick a GPU](#2-pre-flight--pick-a-gpu-that-is-in-stock)
+- [3. Deploy — CUDA 12.9 community](#3-deploy--vllm-v0221-on-cuda-129-community)
+- [4. Watch boot](#4-watch-boot-image-pull--weights--kv-cache)
+- [5. Verify serving](#5-verify-serving--this-is-the-pass)
+- [6. Teardown](#6-teardown--run-at-the-end-of-every-session)
+- [Console path](#console-path-same-stack-no-cli)
+- [Hub alternative](#hub-alternative-serverless-scale-to-zero)
+- [Deployment story — 2026-09-07](#deployment-story--2026-09-07-pass-then-deleted)
+
 ---
 
 ## 0. Delete the failed CUDA-13 3090 — it still bills
