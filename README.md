@@ -15,9 +15,13 @@
 [![GitHub issues](https://img.shields.io/github/issues/javakishore-veleti/LLM-Inference-Serving-Azure-AKS)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-AKS/issues)
 [![GitHub stars](https://img.shields.io/github/stars/javakishore-veleti/LLM-Inference-Serving-Azure-AKS)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-AKS/stargazers)
 
-Deploy **vLLM** serving for **Qwen2.5-7B-Instruct-AWQ** on **Azure AKS**, **Runpod**, or both — same OpenAI-compatible door: `POST /v1/completions`.
+Deploy **vLLM** serving for **Qwen2.5-7B-Instruct-AWQ** on **Azure AKS**, **Runpod**, or both.
 
-Azure AKS: Terraform, NVIDIA GPU Operator, GPU node pool. Runpod: a pinned `vllm/vllm-openai` container on a GPU host (this lab: community RTX 3090) when AKS quota is unavailable. Clients hit `/v1/completions` on whichever path is live.
+**Azure AKS:** Terraform, NVIDIA GPU Operator, GPU node pool.
+
+**Runpod:** a pinned `vllm/vllm-openai` container on a GPU host (community RTX 3090 when AKS quota is unavailable).
+
+**Same OpenAI-compatible door** (`POST /v1/completions`) means the *request* does not care which cloud owns the GPU. Clients send the JSON OpenAI documents for Completions — `model`, `prompt`, `max_tokens` — with `curl` or an OpenAI SDK (`base_url` pointed at this server). Only the host changes: an AKS Service URL vs `https://<POD_ID>-8000.proxy.runpod.net`. It is not Runpod’s serverless `/run` API and not Azure OpenAI. Chat uses `POST /v1/chat/completions` on the same server.
 
 ![LLM Inference Serving](docs/images/hero-llm-inference-serving.png)
 
