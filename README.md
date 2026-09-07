@@ -21,6 +21,12 @@
 
 **Why vLLM.** It is that stack: **PagedAttention** (KV treated like virtual memory so the card stays packed), **continuous batching** (new requests join a running batch instead of waiting for a queue to drain), and an **OpenAI-compatible HTTP** front (`/v1/completions`, `/v1/chat/completions`, `/v1/models`, `/metrics`). Throughput is tokens per second across the batch. That is why this repo serves Qwen with vLLM instead of a raw PyTorch loop.
 
+## What the KV cache is
+
+In a transformer, every new token attends to every token already seen. **K** (keys) and **V** (values) are those per-token tensors. Recomputing them from scratch each step would be too slow, so vLLM **caches** them. That cache is **GPU VRAM**, not the node’s CPU RAM and not a Kubernetes volume. Weights are a fixed rent (about **5.3 GiB** for this AWQ 7B). KV is the rest of `--gpu-memory-utilization` and it **grows** with in-flight sequences × prompt+output length. On the 3090 boot that was **14.43 GiB / 270k tokens**. When the arena fills (`kv_cache_usage_perc` → 1.0), vLLM **preempts** sequences — TTFT falls off a cliff; the pod often stays “Running.” PagedAttention cuts KV into blocks (like virtual memory) so the GPU stays packed. Each **pod owns its own KV**. HTTP requests hit a Service; CPU in the pod runs the API; the GPU holds weights + KV. Two pods do not share cache. That is why round-robin load balancing wastes prefix hits.
+
+![KV cache on GPU in a Kubernetes cluster](docs/images/kv-cache-gpu-k8s.png)
+
 Deploy **vLLM** serving for **Qwen2.5-7B-Instruct-AWQ** on **Azure AKS**, **Runpod**, or both.
 
 **Azure AKS:** Terraform, NVIDIA GPU Operator, GPU node pool.
@@ -33,6 +39,7 @@ Deploy **vLLM** serving for **Qwen2.5-7B-Instruct-AWQ** on **Azure AKS**, **Runp
 
 ## Table of Contents
 
+- [What the KV cache is](#what-the-kv-cache-is)
 - [Why self-hosting LLM Serving instead of calling Frontir Model(s) API?](#why-self-hosting-llm-serving-instead-of-calling-frontir-models-api)
 - [Open Source vs Closed Source Models](#open-source-vs-closed-source-models)
 - [vLLM Model Serving on Azure AKS](#vllm-model-serving-on-azure-aks)
