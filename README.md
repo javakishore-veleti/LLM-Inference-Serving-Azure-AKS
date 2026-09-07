@@ -15,6 +15,17 @@
 [![GitHub issues](https://img.shields.io/github/issues/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD/issues)
 [![GitHub stars](https://img.shields.io/github/stars/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD/stargazers)
 
+Firstly, picture a business application: **Medical Claims Processing**. Adjusters open a **chat window**. Behind it, ordinary backend code (Java, .NET, Node) takes the user’s message, mixes in **business rules** (policy limits, ICD codes, fraud checks) and a **prompt**, and asks an LLM “what should we do with this claim?” Claims data never has to leave the company.
+
+With that picture:
+
+- **HTTP requests** = many users with that chat window open. Each send is an HTTP call from the backend to the model. A busy claims floor can be on the order of **1 million such calls per hour**.
+- **LLM inference** = that backend calling **the company’s own hosted model** — not OpenAI, Claude, Copilot, or Gemini. The company runs the model on **its GPUs** and gets an answer back.
+
+**Qwen** is an LLM from **Alibaba** (the Qwen / Tongyi Qianwen family). The weights are downloadable, so a company can put **Qwen2.5-7B-Instruct-AWQ** on **its own cloud cluster that has GPUs** (Azure AKS or Runpod in this repo) the same way it would host any other internal API.
+
+What the industry calls **LLM inference serving** is just that internal API: the model stays on the GPU, and those chat/backend calls get answers. **vLLM** is the process that makes that API fast when many people chat at once.
+
 **LLM inference serving** is keeping trained weights on a GPU and turning live HTTP requests into generated tokens. Training is over. This is the production path: many callers at once, a stable API, time-to-first-token, and VRAM spent on the **KV cache** (the conversation so far), not on fitting the model once.
 
 **Keeping trained weights** means the Qwen checkpoint stays loaded in GPU VRAM (this AWQ 7B ≈ 5.3 GiB) so every request does not reload 5 GiB from disk or Hugging Face.
