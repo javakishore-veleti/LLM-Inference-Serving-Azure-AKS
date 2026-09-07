@@ -2,6 +2,29 @@
 
 Provisioning a GPU on Azure AKS with Terraform, install the NVIDIA GPU Operator, and server Qwen2.5-7B-instruct-AWQ through vLLM's OpenAI-compatible API - a production shaped inference endpoint, reachable via curl /v1/completions
 
+## Contents
+
+- [Why self-hosting LLM Serving instead of calling Frontir Model(s) API?](#why-self-hosting-llm-serving-instead-of-calling-frontir-models-api)
+- [Open Source vs Closed Source Models](#open-source-vs-closed-source-models)
+- [vLLM Model Serving on Azure AKS](#vllm-model-serving-on-azure-aks)
+  - [Why Kubernetes?](#why-kubernetes)
+  - [Why AKS Specifically?](#why-aks-specifically)
+- [The Driver Decision](#the-driver-decision)
+  - [Why hand the driver to the Operator rather than the node image?](#why-hand-the-driver-to-the-operator-rather-than-the-node-image)
+  - [Measured memory at --gpu-memory-utilization=0.90](#measured-memory-at---gpu-memory-utilization090)
+- [Pinned Versions](#pinned-versions)
+  - [This repo UV Setup on Macbook](#this-repo-uv-setup-on-macbook)
+- [RunPod Management](#runpod-management)
+  - [GitHub Actions](#github-actions)
+  - [vLLM-specific metrics](#vllm-specific-metrics)
+  - [Observability tools](#observability-tools)
+  - [Configurations](#configurations)
+  - [100k requests per hour](#100k-requests-per-hour)
+  - [Cluster of vLLM, API router, load balancer](#cluster-of-vllm-api-router-load-balancer)
+- [References](#references)
+
+---
+
 ## Why self-hosting LLM Serving instead of calling Frontir Model(s) API?
 * Cost at scale - per-token API pricing stops making sense past a certain volume
 * Data and privcay - prompts never leave your network
