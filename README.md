@@ -15,6 +15,8 @@
 [![GitHub issues](https://img.shields.io/github/issues/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD/issues)
 [![GitHub stars](https://img.shields.io/github/stars/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD/stargazers)
 
+This repo shows software engineers deploying an LLM on their company’s Kubernetes cluster, and how **vLLM** helps that cluster handle about **1 million requests per hour** — using **Medical Claims Processing** as the business story for managing the model.
+
 Firstly, picture a business application: **Medical Claims Processing**. Assume **you** submitted a claim. Then people in the **claims office** start working on your claim. For that they open a **chat window** in their office chat app. Behind the chat, ordinary backend code (Java, .NET, Node) takes the message, mixes in **business rules** (coverage limits, medical codes, extra checks) and a **prompt**, and asks the company model “what should we do with this claim?” Claim data never has to leave the company.
 
 ![Medical claims flow: customer, office chat, Azure or Runpod, Qwen](docs/images/medical-claims-flow.png)
