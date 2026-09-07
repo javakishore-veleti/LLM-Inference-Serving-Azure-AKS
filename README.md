@@ -22,6 +22,7 @@ Provisioning a GPU on Azure AKS with Terraform, install the NVIDIA GPU Operator,
   - [Observability tools](#observability-tools)
   - [Configurations](#configurations)
   - [10 million requests per hour](#10-million-requests-per-hour)
+    - [What “tokens × batching” and the 8 000 RPS peak mean](#what-tokens--batching-and-the-8-000-rps-peak-mean)
     - [How many pods](#how-many-pods)
     - [How to track](#how-to-track)
     - [Availability](#availability)
@@ -237,6 +238,33 @@ Serve knobs already used in this lab: `gpu_memory_utilization=0.90`, `max_model_
 
 10 000 000 ÷ 3 600 ≈ **2 778 requests/second** (~167 k/min). That is a *request* rate. Capacity is still **tokens × batching**. An hourly average also hides a 3–5× spike, so you size for **~8 000 RPS peak**, not only 2 778.
 
+#### What “tokens × batching” and the 8 000 RPS peak mean
+
+**A request is not a unit of GPU work.** `/v1/completions` is one HTTP POST. The GPU burns **tokens**.
+
+| Word | Meaning here |
+|---|---|
+| **Token** | A chunk of text the model reads or writes (often ~0.75 words). **Prompt tokens** are prefill: the engine reads the whole prompt and fills KV. **Output tokens** are decode: one new token at a time, each depending on the KV so far. Decode is the long grind. |
+| **Batching** | vLLM’s **continuous batching**. This lab set `max_num_seqs=8`, so up to **eight** sequences share the GPU in one step instead of finishing request 1 before starting request 2. Throughput is tokens/second **across that batch**, not “one curl = one GPU-second.” |
+
+Same 10M requests, different GPU bills:
+
+- 32 output tokens each → this replica’s ~8–12 RPS ballpark (used below).
+- 512 output tokens each → roughly **4–16×** more decode work; RPS per GPU collapses. Request count stayed 10M. Tokens did not.
+
+That is **tokens × batching**: how many tokens you generate, times how many sequences you can keep on the card at once (`max_num_seqs`, KV room). Count `prompt_tokens_total` and `generation_tokens_total`, not only HTTP RPS.
+
+**“Hides a 3–5× spike”** means 2 778 RPS is an *average over 3600 seconds*. Real traffic is lumpy: a launch, a retry storm, a cron, lunch in one timezone. If almost all 10M hits land in 12 busy minutes, the instantaneous rate is far above 2 778. If the busy second is 3× the hourly mean, you need ~8k RPS of *capacity* or you queue/503 during the spike and sit idle the rest of the hour.
+
+**How ~8 000 RPS was chosen** — planning arithmetic, **not** a load test from this lab:
+
+```text
+2 778 RPS × 3  ≈  8 334  →  round to ~8 000 RPS
+2 778 RPS × 5  ≈ 13 890  →  the ugly end of “3–5×”; the tables use 3× so the peak column is not stacked worst-case
+```
+
+3× is a common peak-to-average for interactive APIs when you have no histogram yet. 5× is “we have no idea and retries amplify.” Measure p99 RPS from real or synthetic traffic and replace this. Until then, the peak column is **2 778 × 3**.
+
 This lab replica (`max_num_seqs=8`, ~32-token completions, ~0.7–1 s GPU time per request) holds roughly **8–12 RPS**. Use **10 RPS per GPU replica** as the planning number until you load-test. Long prompts or 512-token answers collapse that number; shared system prompts with a KV-aware router raise it.
 
 A single Runpod container cannot do this. At this QPS you need **Kubernetes in more than one region**, a real inference router, and dashboards that watch KV — not CPU.
@@ -244,6 +272,39 @@ A single Runpod container cannot do this. At this QPS you need **Kubernetes in m
 #### How many pods
 
 One vLLM process = one GPU = one replica for this 7B AWQ (`tensor_parallel_size=1`). AKS `Standard_NC4as_T4_v3` is also one T4 per node. Count **replicas ≈ GPU nodes**.
+
+**Unpack that sentence** (this is the unit you clone, not a bigger box):
+
+| Word | Newbie meaning | In this lab |
+|---|---|---|
+| **Process** | One `vllm serve` (EngineCore + APIServer). It loads **one** copy of the weights into VRAM. | The container command with `--model Qwen/...` |
+| **GPU** | One physical card. One process here takes **the whole card** (`nvidia.com/gpu: 1`). Two vLLMs on one 3090/T4 will OOM or fight. | RTX 3090 (Runpod) or one T4 (AKS SKU) |
+| **Replica** | A copy of that process you can scale: replica 1, replica 2, … Each has **its own** weights and **its own KV cache**. They do not share memory. | Kubernetes `spec.replicas` or N Runpod pods |
+| **Pod** | The Kubernetes (or Runpod) wrapper around that one container. “How many pods?” = how many of those copies. | 1 Runpod pod = 1 replica. On AKS, 1 vLLM pod = 1 replica |
+| **Node** | A VM that *has* GPUs. The pod must land on a node with a free GPU. | `Standard_NC4as_T4_v3` = **one T4 per VM**, so 280 replicas need ~280 GPU VMs |
+| **`tensor_parallel_size=1`** | Do **not** split this 7B AWQ across several GPUs. The whole model fits (~5.3 GiB weights). One replica needs one GPU. | `tensor_parallel_size=2` would be **one** replica that needs **two** GPUs on the **same** node — still one HTTP worker, not two copies |
+
+Picture:
+
+```text
+You  --HTTP-->  router / Service
+                   |     |     |
+                 pod1  pod2  pod280     ← “replicas”
+                  |     |     |
+                 GPU   GPU   GPU        ← one card each
+                  |     |     |
+                node  node  node        ← on T4 SKU, one card per VM
+```
+
+So “how many pods?” is not “how many Kubernetes objects for fun.” It is **how many independent vLLM copies**, which is **how many GPUs**, which on this AKS SKU is **how many GPU nodes**.
+
+When the equation **breaks** (not this 7B AWQ):
+
+- `tensor_parallel_size=N` → one replica occupies N GPUs (often N GPUs on one fat node). Pods ≠ GPUs.
+- A node with 8 GPUs could hold 8 `tp=1` replicas — then replicas ≈ GPUs, **not** ≈ nodes.
+- Runpod today in this repo is **one** pod. 280 is a planning number for AKS (or 280 Runpod pods), not something one Instant Cluster magically is.
+
+Then the table is just division: needed RPS ÷ RPS per replica (we used ~10). 2 778 ÷ 10 ≈ **280**. 8 000 ÷ 10 ≈ **800**.
 
 | Traffic shape (7B AWQ, `max_num_seqs=8`) | Sustained 2 778 RPS | Peak ~8 000 RPS |
 |---|---|---|
@@ -253,6 +314,27 @@ One vLLM process = one GPU = one replica for this 7B AWQ (`tensor_parallel_size=
 | 512-token answers (decode-bound) | 4–8× more GPUs | same |
 
 Add **~15–20% headroom** for rollouts, node drains, and one AZ blip: plan **~330 warm replicas** for the 2 778 RPS average, **~950** if you must absorb the 3× peak without shedding.
+
+330 and 950 are not round lucky numbers. They are **280 × 1.18** and **800 × 1.18**, then rounded. 15–20% is a planning band; **18%** sits in the middle.
+
+```text
+Needed to serve the math:     2 778 ÷ 10 ≈ 280     and     8 000 ÷ 10 ≈ 800
+Spare so some copies can be “away”:   × 1.15 … 1.20
+280 × 1.15 = 322    280 × 1.20 = 336    →  ~330
+800 × 1.15 = 920    800 × 1.20 = 960    →  ~950
+```
+
+**Warm** means those replicas are already Ready (`/v1/models` 200), not “HPA will create them when the spike starts.” Cold start here was ~2 minutes.
+
+| Phrase | What is happening | Why you need spare GPUs |
+|---|---|---|
+| **Rollout** | You ship a new vLLM image or args. Kubernetes (RollingUpdate) starts **new** pods, waits until they are Ready, then kills old ones. `maxUnavailable` / `maxSurge` control how many are in flux. New vLLM pods are useless until weights + compile finish. | During the roll, some fraction is not taking traffic. If you only have exactly 280 Ready, QPS capacity dips for minutes. Extra ~15–20% keeps 280 Serving while 40–50 are coming up or draining out. |
+| **Node drain** | A GPU VM is taken out of service: Azure host patch, you `kubectl drain`, a spot/preempt, disk failure. Every vLLM pod on that node is evicted and must reschedule on another node with a free GPU. On this T4 SKU that is **one replica per node**, so draining 20 nodes = 20 replicas gone until new VMs are Ready. | Cluster autoscaler + GPU Operator + image pull + model load. That is not instant. Headroom is the copies that stay up on nodes you are *not* draining. |
+| **AZ blip** | Availability Zone = one datacenter building in the region (East US zone 1 vs 2 vs 3). A “blip” is that building having a bad hour: power, network, or the zone filling GPU quota. If you spread 280 nodes across 3 AZs, one AZ is ~**33%** of the fleet. | 15–20% does **not** cover losing a whole AZ (that would be ~33% extra or a second region). It covers a **small** zone event: a few racks, one node pool scale hiccup, not “zone deleted.” Full AZ loss is the regional-failover section. |
+
+If two of those happen at once (rollout **and** a drain), 15–20% is tight. That is why it is a band, not a proof. Measure `Ready` vs `Desired` during a real rollout and replace 18% with what you actually lose.
+
+**Shedding** (the ~950 line): if you do **not** keep ~800+ spare for the 3× peak, the gateway returns 429/503 during the spike instead of buying 950 warm GPUs 24/7. 330 is “always on for the *average* 2 778 RPS, with room to roll/drain.” 950 is “always on for the *peak*, no shedding.” Most teams run nearer 330 and shed or scale out (if quota is sitting idle) when RPS jumps.
 
 Token math (why request-count lies): 10M requests × (100 prompt + 32 output) tokens ≈ **367k tokens/s**. Decode on this card is on the order of a few hundred tok/s per GPU at batch 8. If output length doubles, GPU count doubles. Measure `generation_tokens_total` in a load test before you buy quota.
 
