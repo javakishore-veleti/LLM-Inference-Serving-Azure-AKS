@@ -355,7 +355,7 @@ wheels = [
 ]
 
 [[package]]
-name = "llm-inference-serving-azure-aks"
+name = "llm-inference-serving-azure-runpod"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
