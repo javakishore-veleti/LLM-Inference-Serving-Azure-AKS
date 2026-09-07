@@ -6,12 +6,10 @@ Copy/paste-able. **You run these** — do not need Azure GPU quota.
 Same payload as the AKS lab: OpenAI-compatible `/v1/completions`, vLLM **v0.22.1**.
 GPU here is a community **RTX 3090 / 4090** (~16–24 GiB), not Azure T4.
 
-**Image pin on community GPUs:** `vllm/vllm-openai:v0.22.1-cu129` (CUDA 12.9).
-Plain `v0.22.1` is CUDA 13.0 and will not start on typical community GeForce drivers (see trap under step 3).
+**Image:** `vllm/vllm-openai:v0.22.1-cu129` (CUDA 12.9). Use this on community 3090/4090.
 
 ## Contents
 
-- [0. Delete the failed CUDA-13 3090](#0-delete-the-failed-cuda-13-3090--it-still-bills)
 - [1. One-time setup](#1-one-time-setup)
   - [1.1 Install the CLI](#11-install-the-cli)
   - [1.2 API key](#12-api-key)
@@ -26,50 +24,15 @@ Plain `v0.22.1` is CUDA 13.0 and will not start on typical community GeForce dri
 
 ---
 
-## 0. Delete the failed CUDA-13 3090 — it still bills
-
-Pod `qckyjw1fehsqix` rented (`desiredStatus: RUNNING`) then died at container start:
-
-```text
-nvidia-container-cli: requirement error: unsatisfied condition: cuda>=13.0
-```
-
-You cannot change `--image` on a live pod. Delete it, then recreate with `-cu129`.
-
-```bash
-runpodctl pod list
-runpodctl pod delete qckyjw1fehsqix
-runpodctl pod list
-```
-
-If the CLI is not ready yet, use the console: [Pods](https://console.runpod.io/pods) → terminate `llm-inf-serving-vllm-qwen25-7b-awq`.
-
-A template `vllm-qwen25-7b-awq` (`uhotl56xrq`) may already exist and still points at CUDA 13. **Do not** reuse it until you edit the template image to `v0.22.1-cu129`. Prefer `--image` in step 3.
-
----
-
 ## 1. One-time setup
 
 ### 1.1 Install the CLI
-
-On this Mac, Homebrew is the straightforward path:
 
 ```bash
 brew install runpod/runpodctl/runpodctl
 runpodctl update
 runpodctl version
 ```
-
-Official installer (writes under `/usr/local/bin`, so **bash** needs root, not curl):
-
-```bash
-curl -sSL https://cli.runpod.net | sudo bash
-runpodctl version
-```
-
-`sudo curl … | bash` is wrong — only curl runs as root, bash stays your user, and you get `Please run as root with sudo.` Use `curl … | sudo bash`.
-
-If `runpodctl` is still `command not found`, open a new terminal or add the install dir to `PATH`.
 
 ### 1.2 API key
 
@@ -93,15 +56,15 @@ runpodctl pod create --help
 
 `gpu list` shows names you must pass to `--gpu-id` **exactly**. Prefer 16 GiB+ VRAM for this 7B AWQ model.
 
-Live snapshot from this machine. Re-run `gpu list` before create — stock moves. **Sorted cheapest-first** for this 7B AWQ lab:
+Prices below are current as of 2026-09-07. Re-run `gpu list` before create — **stock** moves faster than price. Sorted cheapest-first for this 7B AWQ lab:
 
-| `--gpu-id` | Cloud | ~$/hr | Stock notes |
+| `--gpu-id` | Cloud | ~$/hr | Stock (2026-09-07) |
 |---|---|---|---|
-| `NVIDIA GeForce RTX 3090` | community | **0.22** | **Cheapest that fits.** 24 GiB. Stock was EU-only. Skip `--public-ip` to keep more inventory. |
-| `NVIDIA RTX 2000 Ada Generation` | secure | **0.24** | 16 GiB (same class as Azure T4). Low, EU. |
-| `NVIDIA RTX A6000` | community | 0.33 | 48 GiB. Low; `US-TX-1`. |
-| `NVIDIA GeForce RTX 4090` | community | 0.34 | 24 GiB. `--public-ip` sold out earlier. |
-| `NVIDIA A40` | secure | 0.49 | 48 GiB. **High** stock — pay more to actually get a box. |
+| `NVIDIA GeForce RTX 3090` | community | **0.22** | LOW. 24 GiB. **Cheapest that fits.** Skip `--public-ip`. |
+| `NVIDIA RTX 2000 Ada Generation` | secure | 0.24 | **NONE** — skip until `gpu list` shows it. 16 GiB. |
+| `NVIDIA RTX A6000` | community | 0.33 | LOW. 48 GiB. |
+| `NVIDIA GeForce RTX 4090` | community | 0.34 | **HIGH.** 24 GiB. Easy fallback if 3090 is gone. |
+| `NVIDIA A40` | secure | 0.49 | **HIGH.** 48 GiB. Pay more to get a box. |
 
 Do **not** pick H100/H200/B300/MI300X.
 
@@ -109,19 +72,9 @@ Do **not** pick H100/H200/B300/MI300X.
 
 ## 3. Deploy — vLLM v0.22.1 on CUDA 12.9 (community)
 
-Ports, image, and start args must be set **at create**. You cannot add `8000/http` or swap the image later without deleting and recreating.
+Use image `vllm/vllm-openai:v0.22.1-cu129`. Ports and start args must be set **at create** — you cannot add `8000/http` or change the image later without deleting the pod.
 
-**Cheapest first: community RTX 3090** (~$0.22/hr). No `--public-ip` / `--wait` — those shrink community stock (4090 already sold out that way). Poll `pod get` instead.
-
-**Trap — `cuda>=13.0`:** `vllm/vllm-openai:v0.22.1` (no suffix) is built on CUDA 13.0 and needs host driver **R580+**. Community 3090/4090 hosts usually have older GeForce drivers. You cannot upgrade the host driver. Symptom:
-
-```text
-error running prestart hook #0: ... nvidia-container-cli: requirement error:
-unsatisfied condition: cuda>=13.0, please update your driver to a newer version,
-or use an earlier cuda container
-```
-
-Fix: same vLLM version, CUDA 12.9 tag: `v0.22.1-cu129`. If *that* fails with `cuda>=12.9`, drop to `vllm/vllm-openai:v0.10.2` (CUDA 12.8) or pay for secure **A40** (datacenter driver; CUDA 13 often works). Do **not** start with `NVIDIA_DISABLE_REQUIRE` — that only skips the check; CUDA 13 still will not run on an old GeForce driver.
+Skip `--public-ip` and `--wait` on community. After create, copy the `id` and go to step 4.
 
 ```bash
 runpodctl pod create \
@@ -137,56 +90,47 @@ runpodctl pod create \
   --docker-args "--model Qwen/Qwen2.5-7B-Instruct-AWQ --quantization awq --dtype float16 --gpu-memory-utilization 0.90 --max-model-len 4096 --max-num-seqs 8 --host 0.0.0.0 --port 8000"
 ```
 
-If that returns *no instances available*, next cheapest:
-
 ```bash
-# 16 GiB T4-class, ~$0.24/hr
---gpu-id "NVIDIA RTX 2000 Ada Generation" --cloud-type SECURE
-
-# 48 GiB community ~$0.33/hr
---gpu-id "NVIDIA RTX A6000" --cloud-type COMMUNITY
-
-# 24 GiB community ~$0.34/hr (sold out earlier with --public-ip)
---gpu-id "NVIDIA GeForce RTX 4090" --cloud-type COMMUNITY
-
-# High stock, ~$0.49/hr — pay extra to get a machine
---gpu-id "NVIDIA A40" --cloud-type SECURE --wait
+POD_ID='paste-pod-id-here'
+runpodctl pod get "$POD_ID"
 ```
 
-Example A40 secure create (plain `v0.22.1` / CUDA 13 — datacenter driver is usually new enough):
+`desiredStatus: RUNNING` can still mean the image is pulling. First boot is ~5–15 min. Next: step 4.
+
+### If create says no instances available
+
+Same command, change only GPU/cloud (then re-check `gpu list`):
+
+```bash
+--gpu-id "NVIDIA GeForce RTX 4090" --cloud-type COMMUNITY   # $0.34, often HIGH
+--gpu-id "NVIDIA RTX A6000" --cloud-type COMMUNITY          # $0.33, LOW
+--gpu-id "NVIDIA A40" --cloud-type SECURE --wait            # $0.49, HIGH
+```
+
+`--wait` (secure only) returns when SSH answers, not when the model is loaded.
+
+A40 example (same flags otherwise; `--wait` is OK here):
 
 ```bash
 runpodctl pod create \
   --name llm-inf-serving-vllm-qwen25-7b-awq \
-  --image vllm/vllm-openai:v0.22.1 \
+  --image vllm/vllm-openai:v0.22.1-cu129 \
   --gpu-id "NVIDIA A40" \
   --gpu-count 1 \
   --cloud-type SECURE \
   --container-disk-in-gb 50 \
   --volume-in-gb 30 \
   --volume-mount-path /root/.cache/huggingface \
-  --ports '8000/http,22/tcp' \
+  --ports '8000/http' \
   --docker-args "--model Qwen/Qwen2.5-7B-Instruct-AWQ --quantization awq --dtype float16 --gpu-memory-utilization 0.90 --max-model-len 4096 --max-num-seqs 8 --host 0.0.0.0 --port 8000" \
   --wait
 ```
 
-`--wait` returns when SSH answers, **not** when the model is loaded. First boot still pulls ~11GB image + weights (~5–15 min).
+### If the container never starts
 
-Note the `id` in the JSON. Export it:
+In **system** logs, `cuda>=13.0` or `cuda>=12.9` means this host’s NVIDIA driver is too old for the image. Delete the pod (`runpodctl pod delete "$POD_ID"`) and recreate with `vllm/vllm-openai:v0.10.2`, or use secure A40. Do not set `NVIDIA_DISABLE_REQUIRE`.
 
-```bash
-POD_ID='paste-pod-id-here'
-runpodctl pod get "$POD_ID"
-```
-
-Read `runtimeStatus` (usable) not only `desiredStatus` (`RUNNING` can still mean image pull).
-
-Optional: reuse the saved template instead of `--image`:
-
-```bash
-runpodctl template list
-runpodctl pod create --name llm-inf-serving-vllm-qwen25-7b-awq --template-id uhotl56xrq --gpu-id "NVIDIA GeForce RTX 4090" --cloud-type COMMUNITY --public-ip --wait
-```
+Skip template `uhotl56xrq` — it still points at CUDA 13. Prefer `--image` as above.
 
 ---
 
@@ -210,7 +154,7 @@ Checkpoint lines (same idea as AKS `kubectl logs deploy/vllm`):
 - `GPU KV cache size`
 - `Maximum concurrency`
 
-If you see `cuda>=13.0` / `cuda>=12.9` in **system** logs, delete the pod and recreate with an older CUDA tag (step 3 trap). The GPU is billing the whole time the container cannot start.
+If system logs show `cuda>=13.0` or `cuda>=12.9`, the container never started — delete and follow “If the container never starts” in step 3. You are still billed until delete.
 
 Ctrl-C the follow when the Uvicorn / KV-cache lines appear.
 
@@ -262,7 +206,7 @@ runpodctl pod create --help | grep -i terminate
 
 1. [console.runpod.io/pods](https://console.runpod.io/pods) → **Deploy**
 2. GPU: RTX 4090 or 3090, **Community**
-3. Image: `vllm/vllm-openai:v0.22.1-cu129` (community GeForce). Use plain `v0.22.1` only on a secure datacenter GPU (A40) with a new enough driver.
+3. Image: `vllm/vllm-openai:v0.22.1-cu129`
 4. Container disk 50 GB, volume 30 GB mounted at `/root/.cache/huggingface`
 5. Expose HTTP **8000**
 6. Docker command / args:
