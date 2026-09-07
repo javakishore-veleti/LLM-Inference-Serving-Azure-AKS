@@ -20,7 +20,7 @@ Makes `verify.sh` and `gpu-nodes-scaling.sh` executable.
 ### 1.1 Confirm GPU quota is available
 
 ```bash
-az vm list-usage --location australiacentral \
+az vm list-usage --location eastus \
   --query "[?contains(name.value,'NCASv3_T4')]" --output table
 ```
 Shows `CurrentValue` vs `Limit` for the T4 GPU family. **Result: `0 / 4`** — 4 vCPUs free =
@@ -31,7 +31,7 @@ only one GPU cluster can exist at a time.
 ### 1.2 Dump ALL quota families (find what else is constrained)
 
 ```bash
-az vm list-usage --location australiacentral --output json \
+az vm list-usage --location eastus --output json \
   | jq -r '.[] | select(.limit > 0) | "\(.currentValue)/\(.limit)\t\(.localName)"' \
   | sort -t$'\t' -k2
 ```
@@ -39,10 +39,10 @@ The full picture rather than one family. The four lines that matter here:
 
 | Quota | Value | Consequence |
 |---|---|---|
-| `Standard NCASv3_T4 Family vCPUs` | **0/4** | Exactly one GPU node. No canary/blue-green (needs 2). |
+| `Standard NCASv3_T4 Family vCPUs` | **0/0** | **Blocked.** One `Standard_NC4as_T4_v3` needs 4. Request a limit of 4 in East US. |
 | `Total Regional Low-priority vCPUs` | **0/3** | **Spot GPU is impossible** — the VM needs 4 vCPUs, quota is 3. |
-| `Total Regional vCPUs` | 0/14 | GPU (4) + system (2) = 6. Fits. |
-| `Standard DSv3 Family vCPUs` | 0/10 | `Standard_D2s_v3` system pool fits. |
+| `Total Regional vCPUs` | **0/10** | GPU (4) + system (2) = 6. Fits, once T4 quota exists. |
+| `Standard DSv3 Family vCPUs` | **0/10** | `Standard_D2s_v3` system pool fits. |
 
 ### 1.3 Get real pricing (never estimate — query the API)
 
