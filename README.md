@@ -15,14 +15,16 @@
 [![GitHub issues](https://img.shields.io/github/issues/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD/issues)
 [![GitHub stars](https://img.shields.io/github/stars/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD/stargazers)
 
-Firstly, picture a business application: **Medical Claims Processing**. People who process claims open a **chat window**. Behind it, ordinary backend code (Java, .NET, Node) takes the user’s message, mixes in **business rules** (coverage limits, medical codes, extra checks) and a **prompt**, and asks an LLM “what should we do with this claim?” Claims data never has to leave the company.
+Firstly, picture a business application: **Medical Claims Processing**. Assume **you** submitted a claim. Then people in the **claims office** start working on your claim. For that they open a **chat window** in their office chat app. Behind the chat, ordinary backend code (Java, .NET, Node) takes the message, mixes in **business rules** (coverage limits, medical codes, extra checks) and a **prompt**, and asks the company model “what should we do with this claim?” Claim data never has to leave the company.
+
+![Medical claims flow: customer, office chat, Azure or Runpod, Qwen](docs/images/medical-claims-flow.png)
 
 With that picture:
 
-- **HTTP requests** = many users with that chat window open. Each send is an HTTP call from the backend to the model. A busy claims floor can be on the order of **1 million such calls per hour**.
+- **HTTP requests** = many people in the claims office with that chat window open. Each send is an HTTP call from the backend to the model. A busy office can be on the order of **1 million such calls per hour**.
 - **LLM inference** = that backend calling **the company’s own hosted model** — not OpenAI, Claude, Copilot, or Gemini. The company runs the model on **its GPUs** and gets an answer back.
 
-**Qwen** is an LLM from **Alibaba** (the Qwen / Tongyi Qianwen family). The weights are downloadable, so a company can put **Qwen2.5-7B-Instruct-AWQ** on **its own cloud cluster that has GPUs** (Azure AKS or Runpod in this repo) the same way it would host any other internal API.
+**Qwen** is an LLM from **Alibaba**. The model files are downloadable, so a company can put **Qwen2.5-7B-Instruct-AWQ** on **its own cloud cluster that has GPUs** (Azure AKS or Runpod in this repo) the same way it would host any other internal API. In the picture, vLLM is the program in front of Qwen on that cluster.
 
 What the industry calls **LLM inference serving** is just that internal API: the model stays on the GPU, and those chat/backend calls get answers. **vLLM** is the process that makes that API fast when many people chat at once.
 
