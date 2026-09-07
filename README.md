@@ -17,6 +17,10 @@
 
 **LLM inference serving** is keeping trained weights on a GPU and turning live HTTP requests into generated tokens. Training is over. This is the production path: many callers at once, a stable API, time-to-first-token, and VRAM spent on the **KV cache** (the conversation so far), not on fitting the model once.
 
+**Keeping trained weights** means the Qwen checkpoint stays loaded in GPU VRAM (this AWQ 7B ≈ 5.3 GiB) so every request does not reload 5 GiB from disk or Hugging Face.
+
+**Turning live HTTP requests into tokens** is the business path: an app (checkout, support, search, copilot) sends ~**1 million requests per hour** (~278 RPS) as `POST /v1/completions`. Those calls must hit a GPU that already has the model. **vLLM’s power** is taking that flood and **batching it on the GPU** (PagedAttention + continuous batching + KV) so one card serves many concurrent users instead of one prompt at a time.
+
 **Why LLM inference needs vLLM.** A notebook `model.generate()` runs one prompt, then idles the card. Real traffic is concurrent, uneven, and long-context. Without a serving engine the GPU either waits between requests, OOMs when KV fills, or you write your own batcher, paged KV, and HTTP server. Inference needs that stack; the model file alone is not a service.
 
 **Why vLLM.** It is that stack: **PagedAttention** (KV treated like virtual memory so the card stays packed), **continuous batching** (new requests join a running batch instead of waiting for a queue to drain), and an **OpenAI-compatible HTTP** front (`/v1/completions`, `/v1/chat/completions`, `/v1/models`, `/metrics`). Throughput is tokens per second across the batch. That is why this repo serves Qwen with vLLM instead of a raw PyTorch loop.
