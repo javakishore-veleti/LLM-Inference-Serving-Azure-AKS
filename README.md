@@ -16,8 +16,45 @@ You cannot self-host a closed model - there are no weights to put on a GPU. That
 
 ## vLLM Model Serving on Azure AKS
 
+### Why Kubernetes?
+A single GPU box running python -m vllm... would serve tokens too. Kubernetes earns its place on what comes after:
 
-### UV Setup on Macbook
+
+* Scheduling - GPUs become a countable resource (nvidia.com/gpu: 1), not just a machine (note that GPU is an expensive resource)
+* Isolation - taints and source requests keep cheap pods off the expensive card and stop two containers fighting over one GPU
+* Self-healing - the pod dies, it restarts behind a stable Service address
+* Autoscaling - HPA/KEDA on the pod, node pool to zero between sessions
+* Rollouts - canary and blue/green deployments are built-in primitives, no scripts
+* Ecosystem - GPU Operator, DCGM Metrics, MIG and time-slicing all ship as Kubernetes components
+* Portability - the same manifests run on any cloud's managed Kubernetes
+
+### Why AKS Specifically?
+Azure runs the control plane for free (sku_tier = "Free" ), and node pools are a first-class resource, so the GPU pool is one Terraform block.
+
+## The Driver Decision
+AKS can install an NVIDIA driver for you. This repo deliberately tells it not to.
+
+```text
+gpu_driver = "None"
+driver.enabled = true
+```
+
+### Why hand the driver to the Operator rather than the node image?
+The drivers lifecycle becomes decouple from the OS image. You can upgrade it or pin it per node pool without rebuilding an image drift between nodes stops being invisible, and the driver container toolkit, device plugin, node-feature-discovery and DCGM exporter all arrive as one Helm-versioned, mutually validated stack.
+
+The cost is cold start. The driver DaemonSet must pull, install and pass health checks before the node can schedule the GPU pods at all. That is a real tradeoff, not a free win.
+
+## Pinned Versions
+
+|-------------------------------|-----------|
+| Component                     | Pin       |
+|-------------------------------|-----------|
+| Terraform                     | ~> 1.15   |
+|-------------------------------|-----------|
+| azurerm provider              | ~> 4.0   |
+|-------------------------------|-----------|
+
+### This repo UV Setup on Macbook
 ```shell
 uv add torch torchvision transformers streamlit requests pyairports
 ```
