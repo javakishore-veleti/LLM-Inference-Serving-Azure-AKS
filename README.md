@@ -15,7 +15,7 @@
 [![GitHub issues](https://img.shields.io/github/issues/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD/issues)
 [![GitHub stars](https://img.shields.io/github/stars/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD)](https://github.com/javakishore-veleti/LLM-Inference-Serving-Azure-RUNPOD/stargazers)
 
-Firstly, picture a business application: **Medical Claims Processing**. Adjusters open a **chat window**. Behind it, ordinary backend code (Java, .NET, Node) takes the user’s message, mixes in **business rules** (policy limits, ICD codes, fraud checks) and a **prompt**, and asks an LLM “what should we do with this claim?” Claims data never has to leave the company.
+Firstly, picture a business application: **Medical Claims Processing**. People who process claims open a **chat window**. Behind it, ordinary backend code (Java, .NET, Node) takes the user’s message, mixes in **business rules** (coverage limits, medical codes, extra checks) and a **prompt**, and asks an LLM “what should we do with this claim?” Claims data never has to leave the company.
 
 With that picture:
 
