@@ -44,15 +44,33 @@ The drivers lifecycle becomes decouple from the OS image. You can upgrade it or 
 
 The cost is cold start. The driver DaemonSet must pull, install and pass health checks before the node can schedule the GPU pods at all. That is a real tradeoff, not a free win.
 
+### Measured memory at --gpu-memory-utilization=0.90
+| Item | VRAM |
+| --- | --- |
+| Total card | 15360 MiB |
+| Allocated by vLLM (nvidia-smi) | 13605 MiB |
+| Weights + runtime overhead | ~ 5.97 GiB |
+| Available KV Cache | 7.32 GiB |
+
+
 ## Pinned Versions
 
-|-------------------------------|-----------|
-| Component                     | Pin       |
-|-------------------------------|-----------|
-| Terraform                     | ~> 1.15   |
-|-------------------------------|-----------|
-| azurerm provider              | ~> 4.0   |
-|-------------------------------|-----------|
+| Component | Pin |
+| --- | --- |
+| Terraform | ~> 1.15 |
+| azurerm provider | ~> 4.0 |
+| Kubernetes / Helm Providers | ~> 2.35 / ~> 2.17 |
+| AKS Kubernetes Version | null AKS default for the region |
+| GPU VM | Standard_NC4as_T4_v3 |
+| GPU node OS | Ubuntu2204 (containerd 1.7 - see traps above) |
+| System VM | Standard_D2s_v3 |
+| GPU Operator Chart | v26.3.2, driver.enabled=true |
+| vLLM image | vllm/vllm-openai:v0.22.1 (never: latest) |
+| Model | Qwen/Qwen2.5-7B-Instract-AWQ (ungate - no HF token needed) |
+
+Pinning the vLLM image matters more than it looks: :latest changes engine defaults under you, and a config that worked yesterday OOMs today. On a 15GiB card that margin is thin.
+
+
 
 ### This repo UV Setup on Macbook
 ```shell
